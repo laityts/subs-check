@@ -62,6 +62,18 @@ const routeHandlers = {
         }
     },
 
+    async sub(request, url, env) {
+        try {
+            const key = url.searchParams.get('key') || 'sub';
+            const timestamp = Date.now();
+            const gistUrl = `https://gist.githubusercontent.com/${env.GITHUB_USER}/${env.GITHUB_ID}/raw/${key}?token=${env.AUTH_TOKEN}&timestamp=${timestamp}`;
+            const gistContent = await fetch(gistUrl).then(res => res.text());
+            return createResponse(gistContent, 200, 'text/plain');
+        } catch (error) {
+            return handleError('获取 Sub 内容失败: ' + error.message);
+        }
+    },
+
     async storage(request, url, env) {
         if (!await validateToken(url, env)) {
             return handleError('未授权访问', 401);
@@ -185,6 +197,17 @@ const routeHandlers = {
         } catch (error) {
             return handleError('GitHub 代理失败: ' + error.message);
         }
+    },
+    async dynamicGist(request, url, env, gistId) {
+        try {
+            const key = url.searchParams.get('key') || 'sub';
+            const timestamp = Date.now();
+            const gistUrl = `https://gist.githubusercontent.com/${env.GITHUB_USER}/${gistId}/raw/${key}?token=${env.AUTH_TOKEN}&timestamp=${timestamp}`;
+            const gistContent = await fetch(gistUrl).then(res => res.text());
+            return createResponse(gistContent, 200, 'text/plain');
+        } catch (error) {
+            return handleError('获取动态Gist内容失败: ' + error.message);
+        }
     }
 };
 
@@ -220,20 +243,30 @@ export default {
             const url = new URL(request.url);
             const pathname = url.pathname;
 
+            // 原有路由配置
             const routes = {
                 '/github/': () => routeHandlers.github(request, url),
                 '/gist': () => routeHandlers.gist(request, url, env),
+                '/sub': () => routeHandlers.sub(request, url, env),
                 '/storage': () => routeHandlers.storage(request, url, env),
                 '/speedtest': () => routeHandlers.speedtest(request, url, env),
                 '/raw': () => routeHandlers.raw(request, url)
             };
 
+            // 优先匹配预设路由
             for (const [route, handler] of Object.entries(routes)) {
                 if (pathname === route || pathname.startsWith(route)) {
                     return await handler();
                 }
             }
 
+            // 动态Gist路由匹配 (格式: /32位hex字符)
+            const potentialGistId = pathname.replace(/^\//, ''); // 移除路径开头的斜杠
+            if (/^[0-9a-f]{32}$/i.test(potentialGistId)) {
+                return await routeHandlers.dynamicGist(request, url, env, potentialGistId);
+            }
+
+            // 未匹配到任何路由时走镜像代理
             return await handleMirrorRequest(request, url);
         } catch (error) {
             return handleError('服务器错误: ' + error.message);
